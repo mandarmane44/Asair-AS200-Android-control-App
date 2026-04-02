@@ -17,13 +17,14 @@ jobs:
         flutter-version: '3.19.0'
         channel: 'stable'
         
-    # 1. Create the project structure
+    # 1. Create the project (This generates the 'lib' folder and the Demo app)
     - run: flutter create --project-name asair_mfc_app --platforms android .
     
-    # 2. FORCE: Overwrite the demo app with YOUR main.dart
-    - run: cp lib/main.dart ./lib/main.dart
+    # 2. THE FIX: Copy main.dart from your main repo page directly into the new lib folder
+    # This overwrites the Demo "Counter" app with your MFC Dashboard!
+    - run: cp main.dart lib/main.dart
     
-    # 3. FORCE: Set modern Android compatibility (Min SDK 21, Target 34)
+    # 3. FORCE: Set modern Android compatibility
     - run: |
         sed -i 's/minSdkVersion .*/minSdkVersion 21/' android/app/build.gradle
         sed -i 's/targetSdkVersion .*/targetSdkVersion 34/' android/app/build.gradle
