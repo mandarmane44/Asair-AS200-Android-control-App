@@ -1,5 +1,5 @@
-name: asair_control
-description: ASAir Hardware Controller for Android.
+name: asair_as200_android_control_app
+description: ASAir Hardware Controller for Android OTG.
 publish_to: 'none'
 version: 1.0.0+1
 
