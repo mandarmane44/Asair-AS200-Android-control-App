@@ -111,7 +111,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
     });
   }
 
-  // --- HARDWARE HANDSHAKE WITH PERMISSION OVERRIDE ---
+  // --- HARDWARE HANDSHAKE ---
   Future<void> connectHardware() async {
     setState(() => _status = "Connecting...");
 
@@ -128,15 +128,9 @@ class _ControlDashboardState extends State<ControlDashboard> {
         return;
       }
 
-      setState(() => _status = "Waiting for Android Permission...");
+      setState(() => _status = "Requesting Access...");
       
-      // THE FIX: FORCE THE ANDROID PERMISSION POP-UP
-      bool hasPermission = await UsbSerial.requestPermission(_selectedDevice!);
-      if (!hasPermission) {
-        setState(() => _status = "Error: Android denied USB permission.");
-        return;
-      }
-
+      // The create() function implicitly handles the Android permission popup!
       _port = await _selectedDevice!.create();
       if (_port == null) {
         setState(() => _status = "Error: Android refused port creation.");
