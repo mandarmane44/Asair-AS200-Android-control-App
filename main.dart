@@ -24,20 +24,18 @@ class _ASAirAppState extends State<ASAirApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ASAir AS200 MFC Control App',
+      title: 'Wind Tunnel Control',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
-      // LIGHT THEME
       theme: ThemeData(
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF5F5F5),
         colorScheme: const ColorScheme.light(
-          primary: Color(0xFF8A2BE2), // Violet
-          secondary: Color(0xFFFF8800), // Orange
+          primary: Color(0xFF8A2BE2), 
+          secondary: Color(0xFFFF8800), 
         ),
         cardColor: Colors.white,
       ),
-      // DARK THEME
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF121212),
@@ -66,7 +64,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
   Timer? _pollTimer;
   
   bool _connected = false;
-  bool _isSimulated = false;
+  bool _isSimulated = true; // Default to Ghost Mode on boot
   String _status = "System Offline";
   
   double _currentSlider = 0.0;
@@ -81,7 +79,6 @@ class _ControlDashboardState extends State<ControlDashboard> {
 
   List<UsbDevice> _devices = [];
   UsbDevice? _selectedDevice;
-  bool _useGhostMode = false;
   
   List<int> _rxBuffer = [];
 
@@ -103,80 +100,85 @@ class _ControlDashboardState extends State<ControlDashboard> {
     List<UsbDevice> devices = await UsbSerial.listDevices();
     setState(() {
       _devices = devices;
+      // If devices are found, try to auto-select one with "FTDI" or "UART" in the name, otherwise grab the last one (usually the serial chip, not the hub)
       if (devices.isNotEmpty) {
-        _selectedDevice = devices.first;
-        _useGhostMode = false;
+        _selectedDevice = devices.last; 
+        _isSimulated = false;
       } else {
-        _useGhostMode = true; // Default to Ghost Mode if no OTG cable detected
+        _selectedDevice = null;
+        _isSimulated = true;
       }
     });
   }
 
-  // --- HARDWARE HANDSHAKE ---
   Future<void> connectHardware() async {
     setState(() => _status = "Connecting...");
 
-    if (_useGhostMode) {
-      _isSimulated = true;
-      _connected = true;
-      setState(() => _status = "Online (Ghost Mode)");
-      startTelemetry();
-      return;
-    }
-
-    if (_selectedDevice == null) {
-      setState(() => _status = "No device selected.");
-      return;
-    }
-
-    _port = await _selectedDevice!.create();
-    bool openResult = await _port!.open();
-    if (!openResult) {
-      setState(() => _status = "Failed to open port. Check permissions.");
-      return;
-    }
-
-    await _port!.setDTR(true);
-    await _port!.setRTS(true);
-    await _port!.setPortParameters(19200, UsbPort.DATABITS_8, UsbPort.STOPBITS_2, UsbPort.PARITY_NONE);
-
-    // Incoming Telemetry Listener
-    _port!.inputStream!.listen((Uint8List data) {
-      _rxBuffer.addAll(data);
-      if (_rxBuffer.length >= 9) { // 9 Bytes is a standard Modbus read response
-        if (_rxBuffer[0] == 0x01 && _rxBuffer[1] == 0x03 && _rxBuffer[2] == 0x04) {
-          List<int> payload = _rxBuffer.sublist(3, 7);
-          var bdata = ByteData.view(Uint8List.fromList(payload).buffer);
-          double rawML = bdata.getFloat32(0, Endian.big);
-          double rawSLPM = rawML / 1000.0;
-          double kRatio = kFactors['O2']! / kFactors[_selectedGas]!;
-          
-          if(mounted) {
-            setState(() => _actualFlow = rawSLPM / kRatio);
-          }
-        }
-        _rxBuffer.clear(); 
+    try {
+      if (_isSimulated) {
+        _connected = true;
+        setState(() => _status = "Online (Ghost Mode)");
+        startTelemetry();
+        return;
       }
-    });
 
-    setState(() {
-      _isSimulated = false;
-      _connected = true;
-      _status = "Online & Hardware Verified";
-    });
-    
-    startTelemetry();
+      if (_selectedDevice == null) {
+        setState(() => _status = "Error: No FTDI/USB device selected.");
+        return;
+      }
+
+      _port = await _selectedDevice!.create();
+      if (_port == null) {
+        setState(() => _status = "Error: Android refused port creation.");
+        return;
+      }
+
+      bool openResult = await _port!.open();
+      if (!openResult) {
+        setState(() => _status = "Failed to open port. Check permissions.");
+        return;
+      }
+
+      await _port!.setDTR(true);
+      await _port!.setRTS(true);
+      await _port!.setPortParameters(19200, UsbPort.DATABITS_8, UsbPort.STOPBITS_2, UsbPort.PARITY_NONE);
+
+      _port!.inputStream!.listen((Uint8List data) {
+        _rxBuffer.addAll(data);
+        if (_rxBuffer.length >= 9) { 
+          if (_rxBuffer[0] == 0x01 && _rxBuffer[1] == 0x03 && _rxBuffer[2] == 0x04) {
+            List<int> payload = _rxBuffer.sublist(3, 7);
+            var bdata = ByteData.view(Uint8List.fromList(payload).buffer);
+            double rawML = bdata.getFloat32(0, Endian.big);
+            double rawSLPM = rawML / 1000.0;
+            double kRatio = kFactors['O2']! / kFactors[_selectedGas]!;
+            
+            if(mounted) {
+              setState(() => _actualFlow = rawSLPM / kRatio);
+            }
+          }
+          _rxBuffer.clear(); 
+        }
+      });
+
+      setState(() {
+        _connected = true;
+        _status = "Online & Hardware Verified";
+      });
+      
+      startTelemetry();
+      
+    } catch (e) {
+      setState(() => _status = "CRASH: ${e.toString()}");
+    }
   }
 
-  // --- 5Hz TELEMETRY LOOP ---
   void startTelemetry() {
     _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
       if (_isSimulated) {
-        // Ghost Mode Jitter
         double noise = _currentSlider > 0 ? (Random().nextDouble() * 0.1 - 0.05) : 0.0;
         setState(() => _actualFlow = max(0.0, _currentSlider + noise));
       } else if (_connected && _port != null) {
-        // Real Hardware Read Request (Function 0x03, Address 0, 2 Regs)
         List<int> req = [0x01, 0x03, 0x00, 0x00, 0x00, 0x02];
         int crc = calculateCRC(req);
         req.add(crc & 0xFF);
@@ -186,7 +188,6 @@ class _ControlDashboardState extends State<ControlDashboard> {
     });
   }
 
-  // Modbus CRC-16 Checksum Generator
   int calculateCRC(List<int> bytes) {
     int crc = 0xFFFF;
     for (int pos = 0; pos < bytes.length; pos++) {
@@ -203,11 +204,8 @@ class _ControlDashboardState extends State<ControlDashboard> {
     return crc;
   }
 
-  // --- WRITE COMMAND ---
   void sendFlowCommand(double targetSLPM) async {
-    if (!_connected) return;
-
-    if (_isSimulated) return; // Ghost mode just handles UI logic
+    if (!_connected || _isSimulated || _port == null) return;
 
     double kRatio = kFactors['O2']! / kFactors[_selectedGas]!;
     double adjustedML = (targetSLPM * kRatio) * 1000.0;
@@ -231,7 +229,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ASAir AS200 MFC Control App', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('ASAir OTG Control', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Theme.of(context).colorScheme.primary,
         actions: [
           Row(
@@ -249,14 +247,13 @@ class _ControlDashboardState extends State<ControlDashboard> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600), // Responsive Tablet Lock
+            constraints: const BoxConstraints(maxWidth: 600), 
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   
-                  // --- HARDWARE LINK CARD ---
                   Card(
                     elevation: 4,
                     child: Padding(
@@ -269,14 +266,33 @@ class _ControlDashboardState extends State<ControlDashboard> {
                           Row(
                             children: [
                               Expanded(
-                                child: DropdownButton<bool>(
+                                child: DropdownButton<dynamic>(
                                   isExpanded: true,
-                                  value: _useGhostMode,
+                                  value: _isSimulated ? "ghost" : _selectedDevice,
                                   items: [
-                                    if (_devices.isNotEmpty) const DropdownMenuItem(value: false, child: Text("USB-OTG Hardware")),
-                                    const DropdownMenuItem(value: true, child: Text("SIMULATION MODE (Ghost)")),
+                                    ..._devices.map((device) {
+                                      String name = device.productName ?? "Unknown USB Device";
+                                      return DropdownMenuItem<dynamic>(
+                                        value: device,
+                                        child: Text("$name (VID: ${device.vid})", overflow: TextOverflow.ellipsis),
+                                      );
+                                    }).toList(),
+                                    const DropdownMenuItem<dynamic>(
+                                      value: "ghost", 
+                                      child: Text("SIMULATION MODE (Ghost)")
+                                    ),
                                   ],
-                                  onChanged: _connected ? null : (val) => setState(() => _useGhostMode = val!),
+                                  onChanged: _connected ? null : (val) {
+                                    setState(() {
+                                      if (val == "ghost") {
+                                        _isSimulated = true;
+                                        _selectedDevice = null;
+                                      } else {
+                                        _isSimulated = false;
+                                        _selectedDevice = val as UsbDevice;
+                                      }
+                                    });
+                                  },
                                 ),
                               ),
                               IconButton(icon: const Icon(Icons.refresh), onPressed: _connected ? null : _refreshPorts)
@@ -299,7 +315,6 @@ class _ControlDashboardState extends State<ControlDashboard> {
                   
                   const SizedBox(height: 20),
 
-                  // --- KINEMATICS CARD ---
                   Card(
                     elevation: 4,
                     child: Padding(
@@ -326,7 +341,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
                             value: _currentSlider,
                             min: 0.0,
                             max: 20.0,
-                            divisions: 80, // 0.25 steps
+                            divisions: 80,
                             activeColor: Theme.of(context).colorScheme.secondary,
                             inactiveColor: Theme.of(context).colorScheme.primary.withOpacity(0.3),
                             onChanged: !_connected ? null : (val) {
@@ -388,7 +403,6 @@ class _ControlDashboardState extends State<ControlDashboard> {
 
                   const SizedBox(height: 20),
 
-                  // --- TELEMETRY CARD ---
                   Card(
                     elevation: 4,
                     child: Padding(
