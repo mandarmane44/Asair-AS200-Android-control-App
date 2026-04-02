@@ -131,7 +131,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
       setState(() => _status = "Waiting for Android Permission...");
       
       // THE FIX: FORCE THE ANDROID PERMISSION POP-UP
-      bool hasPermission = await _selectedDevice!.requestPermission();
+      bool hasPermission = await UsbSerial.requestPermission(_selectedDevice!);
       if (!hasPermission) {
         setState(() => _status = "Error: Android denied USB permission.");
         return;
