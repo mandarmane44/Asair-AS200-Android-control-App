@@ -24,7 +24,7 @@ class _ASAirAppState extends State<ASAirApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ASAir Master Control',
+      title: 'ASAir AS200 MFC Control App',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
       // LIGHT THEME
@@ -231,7 +231,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ASAir OTG Control', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('ASAir AS200 MFC Control App', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Theme.of(context).colorScheme.primary,
         actions: [
           Row(
