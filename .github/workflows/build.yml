@@ -18,7 +18,6 @@ jobs:
         channel: 'stable'
         
     - run: flutter create --platforms android .
-    
     - run: flutter pub get
     - run: dart pub global activate rename
     - run: rename setAppName --targets android --value "ASAir AS200 MFC Control App"
