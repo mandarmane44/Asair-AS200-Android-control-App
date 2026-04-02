@@ -65,6 +65,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
   
   bool _connected = false;
   bool _isSimulated = true; // Default to Ghost Mode on boot
+  bool _isTransmitting = false; // RS-485 Half-Duplex Traffic Lock
   String _status = "System Offline";
   
   double _currentSlider = 0.0;
@@ -130,7 +131,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
 
       setState(() => _status = "Requesting Access...");
       
-      // The create() function implicitly handles the Android permission popup!
+      // Implicit Android permission handling
       _port = await _selectedDevice!.create();
       if (_port == null) {
         setState(() => _status = "Error: Android refused port creation.");
@@ -145,7 +146,8 @@ class _ControlDashboardState extends State<ControlDashboard> {
 
       await _port!.setDTR(true);
       await _port!.setRTS(true);
-      await _port!.setPortParameters(19200, UsbPort.DATABITS_8, UsbPort.STOPBITS_2, UsbPort.PARITY_NONE);
+      // CORRECTION: STOPBITS_1 for ASAir AS200 protocol
+      await _port!.setPortParameters(19200, UsbPort.DATABITS_8, UsbPort.STOPBITS_1, UsbPort.PARITY_NONE);
 
       // Incoming Telemetry Listener
       _port!.inputStream!.listen((Uint8List data) {
@@ -178,18 +180,28 @@ class _ControlDashboardState extends State<ControlDashboard> {
     }
   }
 
-  // --- 5Hz TELEMETRY LOOP ---
+  // --- 5Hz TELEMETRY LOOP WITH COLLISION AVOIDANCE ---
   void startTelemetry() {
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) async {
       if (_isSimulated) {
         double noise = _currentSlider > 0 ? (Random().nextDouble() * 0.1 - 0.05) : 0.0;
         setState(() => _actualFlow = max(0.0, _currentSlider + noise));
-      } else if (_connected && _port != null) {
+      } else if (_connected && _port != null && !_isTransmitting) {
+        
+        _isTransmitting = true; // Lock the bus
+        
         List<int> req = [0x01, 0x03, 0x00, 0x00, 0x00, 0x02];
         int crc = calculateCRC(req);
         req.add(crc & 0xFF);
         req.add((crc >> 8) & 0xFF);
-        _port!.write(Uint8List.fromList(req));
+        
+        try {
+          await _port!.write(Uint8List.fromList(req));
+        } catch (e) {
+          // Ignore silent wire drops
+        }
+        
+        _isTransmitting = false; // Unlock the bus
       }
     });
   }
@@ -211,9 +223,11 @@ class _ControlDashboardState extends State<ControlDashboard> {
     return crc;
   }
 
-  // --- WRITE COMMAND ---
+  // --- WRITE COMMAND WITH BUS LOCK ---
   void sendFlowCommand(double targetSLPM) async {
     if (!_connected || _isSimulated || _port == null) return;
+
+    _isTransmitting = true; // Lock out the telemetry reader!
 
     double kRatio = kFactors['O2']! / kFactors[_selectedGas]!;
     double adjustedML = (targetSLPM * kRatio) * 1000.0;
@@ -230,7 +244,15 @@ class _ControlDashboardState extends State<ControlDashboard> {
     frame.add(crc & 0xFF);         
     frame.add((crc >> 8) & 0xFF);   
 
-    await _port!.write(Uint8List.fromList(frame));
+    try {
+      await _port!.write(Uint8List.fromList(frame));
+    } catch(e) {
+      debugPrint("Write failed");
+    }
+    
+    // Give the MFC 150ms to process the valve change before allowing Read commands again
+    await Future.delayed(const Duration(milliseconds: 150)); 
+    _isTransmitting = false; // Unlock the bus!
   }
 
   @override
