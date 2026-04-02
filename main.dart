@@ -31,8 +31,8 @@ class _ASAirAppState extends State<ASAirApp> {
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF5F5F5),
         colorScheme: const ColorScheme.light(
-          primary: Color(0xFF8A2BE2), 
-          secondary: Color(0xFFFF8800), 
+          primary: Color(0xFF8A2BE2), // Violet
+          secondary: Color(0xFFFF8800), // Orange
         ),
         cardColor: Colors.white,
       ),
@@ -100,7 +100,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
     List<UsbDevice> devices = await UsbSerial.listDevices();
     setState(() {
       _devices = devices;
-      // If devices are found, try to auto-select one with "FTDI" or "UART" in the name, otherwise grab the last one (usually the serial chip, not the hub)
+      // Try to auto-select the last device (usually the serial chip, not the hub)
       if (devices.isNotEmpty) {
         _selectedDevice = devices.last; 
         _isSimulated = false;
@@ -111,6 +111,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
     });
   }
 
+  // --- HARDWARE HANDSHAKE WITH PERMISSION OVERRIDE ---
   Future<void> connectHardware() async {
     setState(() => _status = "Connecting...");
 
@@ -124,6 +125,15 @@ class _ControlDashboardState extends State<ControlDashboard> {
 
       if (_selectedDevice == null) {
         setState(() => _status = "Error: No FTDI/USB device selected.");
+        return;
+      }
+
+      setState(() => _status = "Waiting for Android Permission...");
+      
+      // THE FIX: FORCE THE ANDROID PERMISSION POP-UP
+      bool hasPermission = await _selectedDevice!.requestPermission();
+      if (!hasPermission) {
+        setState(() => _status = "Error: Android denied USB permission.");
         return;
       }
 
@@ -143,6 +153,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
       await _port!.setRTS(true);
       await _port!.setPortParameters(19200, UsbPort.DATABITS_8, UsbPort.STOPBITS_2, UsbPort.PARITY_NONE);
 
+      // Incoming Telemetry Listener
       _port!.inputStream!.listen((Uint8List data) {
         _rxBuffer.addAll(data);
         if (_rxBuffer.length >= 9) { 
@@ -173,6 +184,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
     }
   }
 
+  // --- 5Hz TELEMETRY LOOP ---
   void startTelemetry() {
     _pollTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
       if (_isSimulated) {
@@ -188,6 +200,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
     });
   }
 
+  // --- MODBUS CRC-16 CHECK ---
   int calculateCRC(List<int> bytes) {
     int crc = 0xFFFF;
     for (int pos = 0; pos < bytes.length; pos++) {
@@ -204,6 +217,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
     return crc;
   }
 
+  // --- WRITE COMMAND ---
   void sendFlowCommand(double targetSLPM) async {
     if (!_connected || _isSimulated || _port == null) return;
 
@@ -247,13 +261,14 @@ class _ControlDashboardState extends State<ControlDashboard> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600), 
+            constraints: const BoxConstraints(maxWidth: 600), // Responsive Tablet Lock
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   
+                  // --- HARDWARE LINK CARD ---
                   Card(
                     elevation: 4,
                     child: Padding(
@@ -315,6 +330,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
                   
                   const SizedBox(height: 20),
 
+                  // --- KINEMATICS CARD ---
                   Card(
                     elevation: 4,
                     child: Padding(
@@ -341,7 +357,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
                             value: _currentSlider,
                             min: 0.0,
                             max: 20.0,
-                            divisions: 80,
+                            divisions: 80, // 0.25 steps
                             activeColor: Theme.of(context).colorScheme.secondary,
                             inactiveColor: Theme.of(context).colorScheme.primary.withOpacity(0.3),
                             onChanged: !_connected ? null : (val) {
@@ -403,6 +419,7 @@ class _ControlDashboardState extends State<ControlDashboard> {
 
                   const SizedBox(height: 20),
 
+                  // --- TELEMETRY CARD ---
                   Card(
                     elevation: 4,
                     child: Padding(
