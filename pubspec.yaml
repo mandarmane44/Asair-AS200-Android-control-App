@@ -9,7 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  usb_serial: ^0.3.0
+  # THE FIX: Bumping the library to the modern Android 14-compliant version
+  usb_serial: ^0.5.2
 
 flutter:
   uses-material-design: true
