@@ -17,12 +17,19 @@ jobs:
         flutter-version: '3.19.0'
         channel: 'stable'
         
-    # Force create with a safe internal name
+    # 1. Create the project structure
     - run: flutter create --project-name asair_mfc_app --platforms android .
     
+    # 2. FORCE: Overwrite the demo app with YOUR main.dart
+    - run: cp lib/main.dart ./lib/main.dart
+    
+    # 3. FORCE: Set modern Android compatibility (Min SDK 21, Target 34)
+    - run: |
+        sed -i 's/minSdkVersion .*/minSdkVersion 21/' android/app/build.gradle
+        sed -i 's/targetSdkVersion .*/targetSdkVersion 34/' android/app/build.gradle
+
     - run: flutter pub get
     
-    # Rename the app for the Tablet Home Screen
     - run: dart pub global activate rename
     - run: rename setAppName --targets android --value "ASAir AS200 Control"
     
