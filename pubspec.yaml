@@ -1,4 +1,4 @@
-name: asair_as200_android_control_app
+name: asair_mfc_app
 description: ASAir Hardware Controller for Android OTG.
 publish_to: 'none'
 version: 1.0.0+1
